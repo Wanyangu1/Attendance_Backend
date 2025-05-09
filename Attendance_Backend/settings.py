@@ -34,6 +34,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'jazzmin',  
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -46,6 +47,9 @@ INSTALLED_APPS = [
     'corsheaders',  
     'rest_framework_simplejwt.token_blacklist',  
     'django_extensions',
+    'employee',
+    'settings',
+    'import_export',
 ]
 
 MIDDLEWARE = [
@@ -77,6 +81,9 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'Attendance_Backend.wsgi.application'
+
+USE_TZ = True
+TIME_ZONE = 'America/New_York'  # Set your appropriate timezone
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
@@ -116,6 +123,8 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.AllowAny",),
+    'DATE_FORMAT': "%m/%d/%Y",
+    'DATE_INPUT_FORMATS': ["%m/%d/%Y"],
 }
 
 # Simple JSON Web Token Authentication Settings
@@ -140,7 +149,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 JAZZMIN_SETTINGS ={
-    "site_brand": "Mite_Explorers.com",
+    "site_brand": "Attendance Management",
      "icons": {
         "auth": "fas fa-users-cog",
         "auth.user": "fas fa-user",
@@ -150,17 +159,32 @@ JAZZMIN_SETTINGS ={
     "default_icon_children": "fas fa-circle",
     "topmenu_links": [
 
-        {"name": "Download Invoices", "url": "http://localhost:5173/booking-invoice/", "new_window": True},
+        {"name": "Enroll New Employee", "url": "http://localhost:5173/signup/", "new_window": True},
 
-        {"name": "Website Home", "url": "http://localhost:5173/", "new_window": True},
+        {"name": "Back To System", "url": "http://localhost:5173/", "new_window": True},
 
         {"app": "Service_provider"},
     ],
-    "copyright": "Mite_Explorers.com",
-    "welcome_sign": "Mite_Explorers.com"
+    "copyright": "Attendance Management",
+    "welcome_sign": "Attendance Management"
      
 }
 
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / "templates"],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
