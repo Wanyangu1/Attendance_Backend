@@ -1,10 +1,18 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 from datetime import timedelta
 
 User = get_user_model()
+
+
+class UserWorkProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='work_profile')
+    rate_per_hour = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
+    biweekly_total_hours = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.user.username}'s Payment Profile"
 
 
 class TimeRecord(models.Model):
@@ -14,10 +22,6 @@ class TimeRecord(models.Model):
     check_out = models.DateTimeField(null=True, blank=True)
     hours_worked = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     total_paused_time = models.FloatField(default=0)  # in hours
-
-    # Optional fields
-    rate_per_hour = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
-    biweekly_total_hours = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
 
     class Meta:
         unique_together = ('user', 'date')
@@ -31,10 +35,8 @@ class TimeRecord(models.Model):
 
     def save(self, *args, **kwargs):
         if self.check_out:
-            # Total time worked (before pause deduction)
             total_seconds_worked = (self.check_out - self.check_in).total_seconds()
 
-            # Get total paused time within check-in and check-out window
             pauses = PauseRecord.objects.filter(
                 user=self.user,
                 pause_time__gte=self.check_in,
@@ -45,10 +47,16 @@ class TimeRecord(models.Model):
             total_pause_seconds = sum((pause.duration.total_seconds() for pause in pauses), 0)
             self.total_paused_time = round(total_pause_seconds / 3600, 2)
 
-            # Calculate net hours worked
             net_seconds_worked = total_seconds_worked - total_pause_seconds
             net_hours_worked = max(net_seconds_worked / 3600, 0)
             self.hours_worked = round(net_hours_worked, 2)
+
+            # Optional: log or use user profile info
+            user_profile = getattr(self.user, 'work_profile', None)
+            if user_profile:
+                hourly_rate = user_profile.rate_per_hour
+                biweekly_hours = user_profile.biweekly_total_hours
+                # You can use these values as needed, e.g., for calculations or logging
 
         super().save(*args, **kwargs)
 
@@ -72,3 +80,13 @@ class PauseRecord(models.Model):
 
     def __str__(self):
         return f"{self.user.username} paused: {self.reason}"
+
+# ... your existing model code ...
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=User)
+def create_user_work_profile(sender, instance, created, **kwargs):
+    if created and not hasattr(instance, 'work_profile'):
+        UserWorkProfile.objects.create(user=instance)

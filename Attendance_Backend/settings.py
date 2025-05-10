@@ -159,7 +159,7 @@ JAZZMIN_SETTINGS ={
     "default_icon_children": "fas fa-circle",
     "topmenu_links": [
 
-        {"name": "Enroll New Employee", "url": "http://localhost:5173/signup/", "new_window": True},
+        {"name": "Enroll New Employee", "url": "http://localhost:5173/admin-Create-User/signup", "new_window": True},
 
         {"name": "Back To System", "url": "http://localhost:5173/", "new_window": True},
 

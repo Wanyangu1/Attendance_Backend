@@ -17,7 +17,8 @@ class TimeRecordSerializer(serializers.ModelSerializer):
     check_in = serializers.DateTimeField(format='%I:%M %p', input_formats=['%I:%M %p', 'iso-8601'])
     check_out = serializers.DateTimeField(format='%I:%M %p', input_formats=['%I:%M %p', 'iso-8601'], required=False, allow_null=True)
     total_paused_time = serializers.FloatField(required=False)
-    pauses = PauseRecordSerializer(many=True, read_only=True)
+    rate_per_hour = serializers.SerializerMethodField()
+    biweekly_total_hours = serializers.SerializerMethodField()
 
     class Meta:
         model = TimeRecord
@@ -31,15 +32,19 @@ class TimeRecordSerializer(serializers.ModelSerializer):
             'total_paused_time',
             'rate_per_hour',
             'biweekly_total_hours',
-            'pauses',
         ]
         read_only_fields = [
             'id',
             'hours_worked',
             'rate_per_hour',
             'biweekly_total_hours',
-            'pauses',
         ]
+
+    def get_rate_per_hour(self, obj):
+        return getattr(obj.user.work_profile, 'rate_per_hour', None)
+
+    def get_biweekly_total_hours(self, obj):
+        return getattr(obj.user.work_profile, 'biweekly_total_hours', None)
 
 class UserTimeRecordSerializer(serializers.ModelSerializer):
     time_records = TimeRecordSerializer(many=True, read_only=True)
@@ -53,4 +58,3 @@ class ResumeRecordSerializer(serializers.ModelSerializer):
         model = PauseRecord
         fields = ['id', 'user', 'resume_time']
         read_only_fields = ['user', 'resume_time']
-

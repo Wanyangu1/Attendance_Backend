@@ -39,10 +39,9 @@ class PauseView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Check if there's already an active pause for the user
         active_pause = PauseRecord.objects.filter(
             user=request.user,
-            resume_time__isnull=True  # Look for paused records with no resume time
+            resume_time__isnull=True
         ).exists()
 
         if active_pause:
@@ -62,10 +61,9 @@ class ResumeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Retrieve the user's most recent PauseRecord that hasn't been resumed yet
         pause_record = PauseRecord.objects.filter(
             user=request.user,
-            resume_time__isnull=True  # Only consider paused records that haven't been resumed
+            resume_time__isnull=True
         ).last()
 
         if not pause_record:
@@ -74,7 +72,6 @@ class ResumeView(APIView):
         pause_record.resume_time = timezone.now()
         pause_record.save()
 
-        # Serialize the updated record and return the response
         serializer = ResumeRecordSerializer(pause_record)
         return Response({'message': 'Resume recorded successfully.', 'data': serializer.data}, status=status.HTTP_200_OK)
 
