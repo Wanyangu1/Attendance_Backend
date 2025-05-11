@@ -32,6 +32,7 @@ class TimeRecordSerializer(serializers.ModelSerializer):
             'total_paused_time',
             'rate_per_hour',
             'biweekly_total_hours',
+            'is_paused',
         ]
         read_only_fields = [
             'id',

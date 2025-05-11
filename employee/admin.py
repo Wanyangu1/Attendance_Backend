@@ -35,7 +35,7 @@ class TimeRecordResource(resources.ModelResource):
 class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
     resource_class = TimeRecordResource
     list_display = (
-        'user', 'date', 'check_in_time', 'check_out_time',
+        'user', 'date', 'check_in', 'check_out',
         'hours_worked_display', 'paused_time_display', 'status', 'user_summary'
     )
     list_filter = ('date', 'user', 'check_out')
@@ -56,6 +56,10 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+    def date_display(self, obj):
+        return obj.check_in.date() if obj.check_in else "-"
+    date_display.short_description = 'Date'
+    date_display.admin_order_field = 'check_in'
 
     def check_in_time(self, obj):
         return obj.check_in.time() if obj.check_in else '-'

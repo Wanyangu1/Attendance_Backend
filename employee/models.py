@@ -19,9 +19,12 @@ class TimeRecord(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='time_records')
     date = models.DateField()
     check_in = models.DateTimeField()
+    check_in_time = models.TimeField(null=True, blank=True) 
     check_out = models.DateTimeField(null=True, blank=True)
     hours_worked = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     total_paused_time = models.FloatField(default=0)  # in hours
+    is_paused = models.BooleanField(default=False)
+
 
     class Meta:
         unique_together = ('user', 'date')
@@ -80,8 +83,6 @@ class PauseRecord(models.Model):
 
     def __str__(self):
         return f"{self.user.username} paused: {self.reason}"
-
-# ... your existing model code ...
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
