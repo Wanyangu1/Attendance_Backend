@@ -56,6 +56,7 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
     def date_display(self, obj):
         return obj.check_in.date() if obj.check_in else "-"
     date_display.short_description = 'Date'
@@ -120,9 +121,7 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
-        # Calculate hours worked if both check_in and check_out exist
         if obj.check_in and obj.check_out:
-            # Get all pauses that fall within the work period
             pauses = PauseRecord.objects.filter(
                 user=obj.user,
                 pause_time__gte=obj.check_in,
@@ -142,19 +141,20 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
 
 class PauseRecordAdmin(admin.ModelAdmin):
     list_display = (
-        'user', 'reason', 'pause_date', 'pause_time',
-        'resume_time', 'duration_display', 'pause_status'
+        'user', 'reason', 'pause_time_display',
+        'resume_time_display', 'duration_display', 'pause_status'
     )
     list_filter = ('user', 'pause_time', 'resume_time')
     search_fields = ('user__username', 'reason')
-    readonly_fields = ('duration', 'pause_status')
+    readonly_fields = ('pause_time', 'resume_time', 'duration', 'pause_status')
     date_hierarchy = 'pause_time'
     ordering = ('-pause_time',)
 
     fieldsets = (
         (None, {'fields': ('user', 'reason')}),
         ('Timing Info', {
-            'fields': ('pause_time', 'resume_time', 'duration', 'pause_status')
+            'fields': ('pause_time', 'resume_time', 'duration', 'pause_status'),
+            'classes': ('collapse',)
         }),
     )
 
@@ -163,9 +163,13 @@ class PauseRecordAdmin(admin.ModelAdmin):
     pause_date.short_description = "Date"
     pause_date.admin_order_field = 'pause_time'
 
-    def pause_time(self, obj):
-        return obj.pause_time.time() if obj.pause_time else "-"
-    pause_time.short_description = "Pause Time"
+    def pause_time_display(self, obj):
+        return obj.pause_time.strftime("%H:%M:%S") if obj.pause_time else "-"
+    pause_time_display.short_description = "Pause Time"
+
+    def resume_time_display(self, obj):
+        return obj.resume_time.strftime("%H:%M:%S") if obj.resume_time else "-"
+    resume_time_display.short_description = "Resume Time"
 
     def duration_display(self, obj):
         if obj.duration:
@@ -192,6 +196,10 @@ class PauseRecordAdmin(admin.ModelAdmin):
         return qs
 
     def save_model(self, request, obj, form, change):
+        # Set pause_time automatically if it's a new record
+        if not obj.pk and not obj.pause_time:
+            obj.pause_time = timezone.now()
+        
         # Prevent resume time before pause time
         if obj.resume_time and obj.pause_time and obj.resume_time < obj.pause_time:
             obj.resume_time = obj.pause_time + timedelta(seconds=1)
