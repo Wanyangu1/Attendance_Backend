@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.db.models import Sum, F, ExpressionWrapper, DurationField
+from django.db.models import Sum, F, ExpressionWrapper, DurationField, DecimalField
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.html import format_html
@@ -17,7 +17,8 @@ class TimeRecordResource(resources.ModelResource):
         model = TimeRecord
         fields = (
             'user__email', 'date', 'check_in', 'check_out',
-            'hours_worked', 'total_paused_time', 'status'
+            'hours_worked', 'total_paused_time', 'rate_per_hour',
+             'status'
         )
         export_order = fields
 
@@ -29,18 +30,22 @@ class TimeRecordResource(resources.ModelResource):
     def dehydrate_rate_per_hour(self, record):
         return record.user.work_profile.rate_per_hour if hasattr(record.user, 'work_profile') else None
 
-    def dehydrate_biweekly_total_hours(self, record):
-        return record.user.work_profile.biweekly_total_hours if hasattr(record.user, 'work_profile') else None
+    def dehydrate_payment_amount(self, record):
+        if hasattr(record.user, 'work_profile') and record.user.work_profile.rate_per_hour and record.hours_worked:
+            return Decimal(record.hours_worked) * record.user.work_profile.rate_per_hour
+        return None
 
 class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
     resource_class = TimeRecordResource
     list_display = (
         'user', 'date', 'check_in', 'check_out',
-        'hours_worked_display', 'paused_time_display', 'status', 'user_summary'
+        'paused_time_display', 
+        'rate_per_hour_display',
+        'status', 'user_summary'
     )
     list_filter = ('date', 'user', 'check_out')
     search_fields = ('user__username', 'user__email', 'user__first_name', 'user__last_name')
-    readonly_fields = ('hours_worked', 'total_paused_time', 'user_summary', 'status')
+    readonly_fields = ('hours_worked', 'total_paused_time', 'user_summary', 'status', 'rate_per_hour_info', 'payment_amount_info')
     date_hierarchy = 'date'
     ordering = ('-date', '-check_in')
 
@@ -51,11 +56,21 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
         ('Time Information', {
             'fields': ('check_in', 'check_out', 'hours_worked', 'total_paused_time')
         }),
+        ('Payment Information', {
+            'fields': ('rate_per_hour_info', 'payment_amount_info'),
+            'classes': ('collapse',)
+        }),
         ('Summary', {
             'fields': ('user_summary',),
             'classes': ('collapse',)
         }),
     )
+
+    def get_payment_amount(self, obj):
+        """Centralized payment calculation"""
+        if hasattr(obj.user, 'work_profile') and obj.user.work_profile.rate_per_hour and obj.hours_worked:
+            return Decimal(obj.hours_worked) * obj.user.work_profile.rate_per_hour
+        return Decimal(0)
 
     def date_display(self, obj):
         return obj.check_in.date() if obj.check_in else "-"
@@ -80,6 +95,26 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
         return f"{obj.total_paused_time:.2f}h" if obj.total_paused_time else '-'
     paused_time_display.short_description = 'Paused Time'
 
+    def rate_per_hour_display(self, obj):
+        if hasattr(obj.user, 'work_profile') and obj.user.work_profile.rate_per_hour:
+            return f"${obj.user.work_profile.rate_per_hour:.2f}/h"
+        return '-'
+    rate_per_hour_display.short_description = 'Rate/Hour'
+    rate_per_hour_display.admin_order_field = 'user__work_profile__rate_per_hour'
+
+    def payment_amount_display(self, obj):
+        payment = self.get_payment_amount(obj)
+        return f"${payment:.2f}" if payment > 0 else '-'
+    payment_amount_display.short_description = 'Payment'
+
+    def rate_per_hour_info(self, obj):
+        return self.rate_per_hour_display(obj)
+    rate_per_hour_info.short_description = 'Rate per Hour'
+
+    def payment_amount_info(self, obj):
+        return self.payment_amount_display(obj)
+    payment_amount_info.short_description = 'Payment Amount'
+
     def status(self, obj):
         if obj.check_out:
             return format_html('<span style="color: green;">✓ Completed</span>')
@@ -92,25 +127,23 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
         days_worked = user_records.values('date').distinct().count()
         avg_hours = total_hours / Decimal(days_worked) if days_worked else Decimal(0)
         
+        current_payment = self.get_payment_amount(obj)
         profile = getattr(obj.user, 'work_profile', None)
-        rate = profile.rate_per_hour if profile else None
-        estimated_pay = total_hours * Decimal(rate) if rate else None
+        total_payment = total_hours * profile.rate_per_hour if profile and profile.rate_per_hour else Decimal(0)
         
         summary = [
-            f"<b>Total:</b> {total_hours:.2f}h",
+            f"<b>Hours:</b> {total_hours:.2f}h",
             f"<b>Days:</b> {days_worked}",
-            f"<b>Avg:</b> {avg_hours:.2f}h/day"
+            f"<b>Avg/Day:</b> {avg_hours:.2f}h",
+            f"<b>Total:</b> ${total_payment:.2f}"
         ]
-        
-        if estimated_pay is not None:
-            summary.append(f"<b>Est. Pay:</b> ${estimated_pay:.2f}")
             
         return format_html(" | ".join(summary))
     user_summary.short_description = 'User Summary'
     user_summary.allow_tags = True
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request).select_related('user')
+        qs = super().get_queryset(request).select_related('user__work_profile')
         if not request.user.is_superuser:
             qs = qs.filter(user=request.user)
         return qs.annotate(
@@ -141,50 +174,73 @@ class TimeRecordAdmin(ExportMixin, admin.ModelAdmin):
 
 class PauseRecordAdmin(admin.ModelAdmin):
     list_display = (
-        'user', 'reason', 'pause_time_display',
-        'resume_time_display', 'duration_display', 'pause_status'
+        'user', 'reason', 'pause_datetime_display',
+        'resume_datetime_display', 'duration_display', 'pause_status'
     )
     list_filter = ('user', 'pause_time', 'resume_time')
     search_fields = ('user__username', 'reason')
-    readonly_fields = ('pause_time', 'resume_time', 'duration', 'pause_status')
+    readonly_fields = ('pause_time', 'resume_time', 'duration', 'pause_status', 
+                      'pause_datetime_info', 'resume_datetime_info')
     date_hierarchy = 'pause_time'
     ordering = ('-pause_time',)
 
     fieldsets = (
         (None, {'fields': ('user', 'reason')}),
         ('Timing Info', {
-            'fields': ('pause_time', 'resume_time', 'duration', 'pause_status'),
+            'fields': ('pause_datetime_info', 'resume_datetime_info', 'duration', 'pause_status'),
             'classes': ('collapse',)
         }),
     )
 
-    def pause_date(self, obj):
-        return obj.pause_time.date() if obj.pause_time else "-"
-    pause_date.short_description = "Date"
-    pause_date.admin_order_field = 'pause_time'
+    def _convert_to_arizona_time(self, dt):
+        """Convert datetime to Arizona timezone (MST, no DST)"""
+        if not dt:
+            return None
+        arizona_tz = timezone.get_fixed_timezone(-420)  # UTC-7 (MST)
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.utc)
+        return dt.astimezone(arizona_tz)
 
-    def pause_time_display(self, obj):
-        return obj.pause_time.strftime("%H:%M:%S") if obj.pause_time else "-"
-    pause_time_display.short_description = "Pause Time"
+    def pause_datetime_display(self, obj):
+        if obj.pause_time:
+            az_time = self._convert_to_arizona_time(obj.pause_time)
+            return az_time.strftime("%Y-%m-%d %I:%M:%S %p")
+        return "-"
+    pause_datetime_display.short_description = "Pause Date & Time (Arizona)"
+    pause_datetime_display.admin_order_field = 'pause_time'
 
-    def resume_time_display(self, obj):
-        return obj.resume_time.strftime("%H:%M:%S") if obj.resume_time else "-"
-    resume_time_display.short_description = "Resume Time"
+    def resume_datetime_display(self, obj):
+        if obj.resume_time:
+            az_time = self._convert_to_arizona_time(obj.resume_time)
+            return az_time.strftime("%Y-%m-%d %I:%M:%S %p")
+        return "-"
+    resume_datetime_display.short_description = "Resume Date & Time (Arizona)"
+    resume_datetime_display.admin_order_field = 'resume_time'
+
+    def pause_datetime_info(self, obj):
+        return self.pause_datetime_display(obj)
+    pause_datetime_info.short_description = "Pause Date & Time (Arizona)"
+
+    def resume_datetime_info(self, obj):
+        return self.resume_datetime_display(obj)
+    resume_datetime_info.short_description = "Resume Date & Time (Arizona)"
 
     def duration_display(self, obj):
         if obj.duration:
             total_sec = obj.duration.total_seconds()
             hours, rem = divmod(total_sec, 3600)
             minutes, seconds = divmod(rem, 60)
-            return f"{int(hours)}h {int(minutes)}m"
+            return f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
         return "Ongoing"
     duration_display.short_description = "Duration"
 
     def pause_status(self, obj):
         if obj.resume_time:
             return format_html('<span style="color: green;">✓ Completed</span>')
-        elif obj.pause_time.date() == timezone.now().date():
-            return format_html('<span style="color: orange;">⏸ Active (Today)</span>')
+        elif obj.pause_time:
+            az_time = self._convert_to_arizona_time(obj.pause_time)
+            if az_time.date() == self._convert_to_arizona_time(timezone.now()).date():
+                return format_html('<span style="color: orange;">⏸ Active (Today)</span>')
         return format_html('<span style="color: red;">⏸ Active (Older)</span>')
     pause_status.short_description = "Status"
     pause_status.allow_tags = True
@@ -196,19 +252,15 @@ class PauseRecordAdmin(admin.ModelAdmin):
         return qs
 
     def save_model(self, request, obj, form, change):
-        # Set pause_time automatically if it's a new record
         if not obj.pk and not obj.pause_time:
             obj.pause_time = timezone.now()
         
-        # Prevent resume time before pause time
         if obj.resume_time and obj.pause_time and obj.resume_time < obj.pause_time:
             obj.resume_time = obj.pause_time + timedelta(seconds=1)
         
-        # Calculate duration if both times exist
         if obj.pause_time and obj.resume_time:
             obj.duration = obj.resume_time - obj.pause_time
         
-        # Prevent multiple active pauses
         if not obj.resume_time:
             existing = PauseRecord.objects.filter(
                 user=obj.user, 
@@ -225,20 +277,30 @@ class PauseRecordAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 class UserWorkProfileAdmin(admin.ModelAdmin):
-    list_display = ('user_email', 'rate_per_hour', 'biweekly_total_hours', 'estimated_pay')
-    search_fields = ('user__email', 'user__username')
+    list_display = ('user', 'rate_per_hour', 'biweekly_total_hours', 'estimated_pay', 'recent_hours_worked')
+    search_fields = ('user__email', 'user_')
     list_editable = ('rate_per_hour', 'biweekly_total_hours')
 
-    def user_email(self, obj):
-        return obj.user.email
-    user_email.short_description = 'Email'
-    user_email.admin_order_field = 'user__email'
+    def user(self, obj):
+        return obj.user.username
+    user.short_description = 'Username'
+    user.admin_order_field = 'user_'
 
     def estimated_pay(self, obj):
         if not obj.rate_per_hour or not obj.biweekly_total_hours:
             return "-"
         return f"${obj.rate_per_hour * obj.biweekly_total_hours:.2f}"
     estimated_pay.short_description = 'Est. Biweekly Pay'
+
+    def recent_hours_worked(self, obj):
+        records = TimeRecord.objects.filter(
+            user=obj.user,
+            date__gte=timezone.now().date() - timedelta(days=14)
+        )
+        total_hours = sum([Decimal(record.hours_worked or 0) for record in records], Decimal(0))
+        return f"{total_hours:.2f}h"
+    recent_hours_worked.short_description = 'Recent Hours (14d)'
+
 
 admin.site.register(TimeRecord, TimeRecordAdmin)
 admin.site.register(PauseRecord, PauseRecordAdmin)

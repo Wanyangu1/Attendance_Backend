@@ -22,5 +22,7 @@ urlpatterns = [
     path("api/", include("Attendance_Backend.api.urls")),
     path("api/attendance/", include("employee.urls")),
     path("api/user/", include("settings.urls")),
+    path('', include('clients.urls')),
+    path('api/', include('goals.urls')),
     ]
 
